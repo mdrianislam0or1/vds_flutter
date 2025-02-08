@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vds_flutter/VDS/VDS_API_Service.dart';
 
 class Home extends StatefulWidget {
@@ -91,8 +92,11 @@ class _HomeState extends State<Home> {
         _token = token;
       });
 
+      // Store token in shared preferences
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString('auth_token', token!);
+
       _showSuccess('Authentication successful');
-      await _fetchProfile();
     } catch (e) {
       setState(() {
         _error = 'Authentication error: $e';
@@ -106,7 +110,10 @@ class _HomeState extends State<Home> {
   }
 
   Future<void> _fetchProfile() async {
-    if (_token == null) {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('auth_token');
+
+    if (token == null) {
       _showError('Not authenticated');
       return;
     }
@@ -118,7 +125,7 @@ class _HomeState extends State<Home> {
 
     try {
       final profile = await _vdsService.getProfile(
-        token: _token!,
+        token: token,
         clientCertBytes: _clientCertBytes!,
         caCertBytes: _caCertBytes!,
         password: _password,
@@ -202,6 +209,11 @@ class _HomeState extends State<Home> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Text('Authenticate'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: _isLoading ? null : _fetchProfile,
+              child: const Text('Get Profile'),
             ),
             const SizedBox(height: 8),
             if (_isLoading)
