@@ -13,6 +13,7 @@ dependencies:
   http: ^1.3.0
   path_provider: ^2.1.5
   shared_preferences: ^2.5.1
+  open_file: ^3.5.10
 
 dev_dependencies:
   flutter_test:
@@ -24,3 +25,4 @@ flutter:
   assets:
     - assets/certs/client.p12
     - assets/certs/root_cert.pem
+    - assets/demo.pdf
