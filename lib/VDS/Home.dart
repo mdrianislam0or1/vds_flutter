@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -98,7 +99,7 @@ class _HomeState extends State<Home> {
           _pdfBytes = base64Decode(base64PdfContent);
           setState(() {
             _sealedPdfData = 'PDF Sealed Successfully';
-            _savedFilePath = null; // Reset saved file path
+            _savedFilePath = null;
           });
         } catch (e) {
           setState(() => _sealedPdfData = 'Error decoding PDF: $e');
@@ -136,59 +137,98 @@ class _HomeState extends State<Home> {
   }
 
   Future<void> _downloadPdfMobile() async {
-    // Request storage permission for Android
-    if (!kIsWeb && Platform.isAndroid) {
-      var storageStatus = await Permission.storage.status;
-      if (!storageStatus.isGranted) {
-        storageStatus = await Permission.storage.request();
-        if (!storageStatus.isGranted) {
-          throw Exception('Storage permission denied');
-        }
-      }
+    try {
+      if (Platform.isAndroid) {
+        // Check Android version
+        final androidInfo = await DeviceInfoPlugin().androidInfo;
+        final int androidVersion = androidInfo.version.sdkInt;
 
-      // For Android 10 and above, we might also need manage external storage permission
-      if (await Permission.manageExternalStorage.isGranted) {
-        var manageStorageStatus = await Permission.manageExternalStorage.status;
-        if (!manageStorageStatus.isGranted) {
-          manageStorageStatus =
-              await Permission.manageExternalStorage.request();
-          if (!manageStorageStatus.isGranted) {
-            throw Exception('Manage storage permission denied');
+        if (androidVersion >= 30) {
+          // Android 11 or higher
+          final status = await Permission.storage.request();
+          if (!status.isGranted) {
+            throw Exception('Storage permission required');
+          }
+        } else {
+          // For Android 10 and below
+          final status = await Permission.storage.request();
+          if (!status.isGranted) {
+            throw Exception('Storage permission required');
           }
         }
+
+        // Get the downloads directory
+        Directory? directory;
+        if (androidVersion >= 30) {
+          directory = Directory('/storage/emulated/0/Download');
+        } else {
+          directory = await getExternalStorageDirectory();
+        }
+
+        if (directory == null) {
+          throw Exception('Could not access download directory');
+        }
+
+        final fileName =
+            'sealed_document_${DateTime.now().millisecondsSinceEpoch}.pdf';
+        final filePath = '${directory.path}/$fileName';
+
+        // Save the file
+        File file = File(filePath);
+        await file.writeAsBytes(_pdfBytes!);
+
+        setState(() {
+          _savedFilePath = filePath;
+          _sealedPdfData = 'PDF saved to Downloads folder';
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF saved to Downloads folder'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        // For iOS, use the documents directory
+        final directory = await getApplicationDocumentsDirectory();
+        final fileName =
+            'sealed_document_${DateTime.now().millisecondsSinceEpoch}.pdf';
+        final filePath = '${directory.path}/$fileName';
+
+        File file = File(filePath);
+        await file.writeAsBytes(_pdfBytes!);
+
+        setState(() {
+          _savedFilePath = filePath;
+          _sealedPdfData = 'PDF saved successfully';
+        });
       }
+    } catch (e) {
+      _showErrorDialog('Download Error', e.toString());
     }
-
-    // Get the downloads directory
-    final directory = await _getDownloadPath();
-    if (directory == null)
-      throw Exception('Could not access download directory');
-
-    final fileName =
-        'sealed_document_${DateTime.now().millisecondsSinceEpoch}.pdf';
-    final filePath = '${directory.path}/$fileName';
-
-    // Save the file
-    File file = File(filePath);
-    await file.writeAsBytes(_pdfBytes!);
-
-    setState(() {
-      _savedFilePath = filePath;
-      _sealedPdfData = 'PDF saved successfully';
-    });
-
-    // Show share dialog for mobile
-    await Share.shareXFiles(
-      [XFile(filePath)],
-      text: 'Sealed PDF Document',
-    );
   }
 
-  Future<Directory?> _getDownloadPath() async {
-    if (Platform.isAndroid) {
-      return await getExternalStorageDirectory();
-    } else {
-      return await getApplicationDocumentsDirectory();
+  Future<void> _sharePdf() async {
+    if (_pdfBytes == null) {
+      _showErrorDialog('Share Error', 'No PDF data available');
+      return;
+    }
+
+    try {
+      final directory = await getTemporaryDirectory();
+      final fileName =
+          'sealed_document_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final filePath = '${directory.path}/$fileName';
+
+      File file = File(filePath);
+      await file.writeAsBytes(_pdfBytes!);
+
+      await Share.shareXFiles(
+        [XFile(filePath)],
+        text: 'Sealed PDF Document',
+      );
+    } catch (e) {
+      _showErrorDialog('Share Error', e.toString());
     }
   }
 
@@ -275,11 +315,29 @@ class _HomeState extends State<Home> {
               ],
               if (_pdfBytes != null) ...[
                 const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  onPressed: _downloadPdf,
-                  icon: const Icon(Icons.download),
-                  label: Text(kIsWeb ? 'Download PDF' : 'Save & Share PDF'),
-                ),
+                if (kIsWeb)
+                  ElevatedButton.icon(
+                    onPressed: _downloadPdf,
+                    icon: const Icon(Icons.download),
+                    label: const Text('Download PDF'),
+                  )
+                else
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: _downloadPdf,
+                        icon: const Icon(Icons.download),
+                        label: const Text('Save to Downloads'),
+                      ),
+                      const SizedBox(width: 16),
+                      ElevatedButton.icon(
+                        onPressed: _sharePdf,
+                        icon: const Icon(Icons.share),
+                        label: const Text('Share PDF'),
+                      ),
+                    ],
+                  ),
               ],
             ],
           ),
