@@ -1,7 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:universal_html/html.dart' as html;
 
 import 'SealPdfService.dart';
 import 'auth_service.dart';
@@ -23,6 +27,7 @@ class _HomeState extends State<Home> {
   String? _digitalIdentityUUID;
   bool _isLoading = false;
   String? _sealedPdfData;
+  Uint8List? _pdfBytes;
 
   Future<void> _getProfile() async {
     setState(() => _isLoading = true);
@@ -74,14 +79,67 @@ class _HomeState extends State<Home> {
         pdfBase64: pdfBase64,
       );
 
-      setState(() {
-        _sealedPdfData =
-            'PDF Sealed Successfully\nSealed PDF Data: ${sealedPdf.toString()}';
-      });
+      await _handleSealedPdf(sealedPdf);
     } catch (e) {
       setState(() => _sealedPdfData = 'Error sealing PDF: $e');
+      print('Error sealing PDF: $e');
     } finally {
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleSealedPdf(Map<String, dynamic>? sealedPdf) async {
+    if (sealedPdf != null && sealedPdf['signedData'] != null) {
+      List<dynamic> signedDataList = sealedPdf['signedData'];
+      if (signedDataList.isNotEmpty) {
+        String base64PdfContent = signedDataList[0];
+        try {
+          _pdfBytes = base64Decode(base64PdfContent);
+          setState(() {
+            _sealedPdfData = 'PDF Sealed Successfully';
+          });
+        } catch (e) {
+          setState(() {
+            _sealedPdfData = 'Error decoding PDF: $e';
+          });
+          print('Error decoding PDF: $e');
+        }
+      }
+    }
+  }
+
+  Future<void> _downloadPdf() async {
+    if (_pdfBytes == null) {
+      setState(() => _sealedPdfData = 'No PDF data available');
+      return;
+    }
+
+    if (kIsWeb) {
+      _downloadPdfWeb();
+    } else {
+      await _downloadPdfMobile();
+    }
+  }
+
+  void _downloadPdfWeb() {
+    final blob = html.Blob([_pdfBytes]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute("download", "sealed_document.pdf")
+      ..click();
+    html.Url.revokeObjectUrl(url);
+  }
+
+  Future<void> _downloadPdfMobile() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final filePath = '${directory.path}/sealed_document.pdf';
+      File file = File(filePath);
+      await file.writeAsBytes(_pdfBytes!);
+      setState(() => _sealedPdfData = 'PDF saved to: $filePath');
+    } catch (e) {
+      setState(() => _sealedPdfData = 'Error saving PDF: $e');
+      print('Error saving PDF: $e');
     }
   }
 
@@ -118,6 +176,11 @@ class _HomeState extends State<Home> {
                 Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Text(_sealedPdfData!, textAlign: TextAlign.center),
+                ),
+              if (_pdfBytes != null)
+                ElevatedButton(
+                  onPressed: _downloadPdf,
+                  child: const Text('Download Sealed PDF'),
                 ),
             ],
           ),
